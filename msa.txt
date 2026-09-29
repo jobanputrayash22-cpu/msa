@@ -1,0 +1,202 @@
+msa
+
+CREATE DATABASE busdb;
+USE busdb;
+
+CREATE TABLE busmaster (
+    busid INT PRIMARY KEY,
+    busname VARCHAR(50),
+    bustype VARCHAR(20),
+    registrationno VARCHAR(30),
+    capacity INT,
+    arrivaltime VARCHAR(20)
+);
+
+CREATE TABLE routes (
+    routeid INT PRIMARY KEY,
+    source VARCHAR(50),
+    destination VARCHAR(50)
+);
+
+CREATE TABLE bus_route (
+    routeid INT,
+    busid INT,
+    PRIMARY KEY(routeid, busid),
+    FOREIGN KEY(routeid) REFERENCES routes(routeid),
+    FOREIGN KEY(busid) REFERENCES busmaster(busid)
+);
+
+
+INSERT INTO busmaster VALUES
+(1,'Express A','Seating','GJ01AB1234',50,'10:30'),
+(2,'Volvo B','Sleeper','GJ05CD5678',40,'12:00'),
+(3,'Express C','Seating','GJ01EF9012',50,'14:30');
+
+INSERT INTO routes VALUES
+(101,'Surat','Ahmedabad'),
+(102,'Surat','Vadodara');
+
+INSERT INTO bus_route VALUES
+(101,1),
+(101,2),
+(102,3);
+
+
+5. BusApplication.java
+
+
+package com.mycompany.bus;
+
+import jakarta.ws.rs.ApplicationPath;
+import jakarta.ws.rs.core.Application;
+
+@ApplicationPath("/rest")
+public class BusApplication extends Application {
+}
+
+
+6. BusResource.java — MAIN CODE
+
+
+package com.mycompany.bus;
+
+import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import java.sql.*;
+import java.util.*;
+
+@Path("/bus")
+@Produces(MediaType.APPLICATION_JSON)
+public class BusResource {
+
+    @GET
+    @Path("/getBuses")
+    @RolesAllowed("TRAVELLER")
+    public Collection<BusMaster> getBuses(
+            @QueryParam("source") String source,
+            @QueryParam("destination") String destination) {
+
+        Collection<BusMaster> buses = new ArrayList<>();
+
+        String sql =
+            "SELECT b.busid, b.busname, b.bustype, " +
+            "b.registrationno, b.capacity, b.arrivaltime " +
+            "FROM busmaster b " +
+            "JOIN bus_route br ON b.busid = br.busid " +
+            "JOIN routes r ON br.routeid = r.routeid " +
+            "WHERE r.source=? AND r.destination=?";
+
+        try (Connection con = DBConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, source);
+            ps.setString(2, destination);
+
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+
+                BusMaster bus = new BusMaster(
+                    rs.getInt("busid"),
+                    rs.getString("busname"),
+                    rs.getString("bustype"),
+                    rs.getString("registrationno"),
+                    rs.getInt("capacity"),
+                    rs.getString("arrivaltime")
+                );
+
+                buses.add(bus);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return buses;
+    }
+}
+
+11. UserApplication.java
+package com.mycompany.user;
+
+import jakarta.ws.rs.ApplicationPath;
+import jakarta.ws.rs.core.Application;
+
+@ApplicationPath("/rest")
+public class UserApplication extends Application {
+}
+
+
+12. BusClient.java
+Ye BusApplication ko request kareg
+
+
+package com.mycompany.user;
+
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.ClientBuilder;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+
+public class BusClient {
+
+    public String getBuses(String source, String destination, String token) {
+
+        Client client = ClientBuilder.newClient();
+
+        String url =
+            "http://localhost:8080/BusApplication/rest/bus/getBuses"
+            + "?source=" + source
+            + "&destination=" + destination;
+
+        Response response = client.target(url)
+                .request(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer " + token)
+                .get();
+
+        String result = response.readEntity(String.class);
+
+        response.close();
+        client.close();
+
+        return result;
+    }
+}
+
+
+sevlet code
+
+
+package com.mycompany.user;
+
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
+import java.io.IOException;
+
+public class BusServlet extends HttpServlet {
+
+    protected void doGet(
+            HttpServletRequest request,
+            HttpServletResponse response)
+            throws ServletException, IOException {
+
+        String source = request.getParameter("source");
+        String destination = request.getParameter("destination");
+
+        String token = "YOUR_JWT_TOKEN";
+
+        BusClient client = new BusClient();
+
+        String result =
+            client.getBuses(source, destination, token);
+
+        response.setContentType("application/json");
+
+        response.getWriter().print(result);
+    }
+}
+
+
+java -jar payara-micro-6.2025.5.jar --deploy
+
